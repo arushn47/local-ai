@@ -1,481 +1,24 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
-// --- Helper Components ---
-
-const ModelSelector = ({ model, setModel }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-
-    const models = [
-        { value: 'llava:latest', label: 'Llava' },
-        { value: 'deepseek-r1:latest', label: 'Deepseek R1' },
-        { value: 'bakllava:latest', label: 'BakLlava' },
-    ];
-
-    const selectedModelLabel = models.find(m => m.value === model)?.label;
-
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-        };
-    }, []);
-
-    const handleOptionClick = (value) => {
-        setModel(value);
-        setIsOpen(false);
-    };
-
-    return (
-        <div className="relative w-48" ref={dropdownRef}>
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="bg-neutral-900 border border-white/10 rounded-full text-white text-sm font-medium pl-4 pr-10 py-2 w-full text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-white/20 hover:bg-neutral-800 transition-colors cursor-pointer"
-                aria-haspopup="true"
-                aria-expanded={isOpen}
-            >
-                <span>{selectedModelLabel}</span>
-                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400">
-                    <svg className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                    </svg>
-                </span>
-            </button>
-            {isOpen && (
-                <div className="absolute top-full mt-2 w-full bg-neutral-900 border border-white/10 rounded-2xl shadow-lg z-10 overflow-hidden animate-fade-in-up">
-                    <ul>
-                        {models.map((option) => (
-                            <li
-                                key={option.value}
-                                onClick={() => handleOptionClick(option.value)}
-                                className="px-4 py-2 text-sm text-white hover:bg-neutral-800 cursor-pointer transition-colors"
-                            >
-                                {option.label}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-        </div>
-    );
-};
-
-const DeleteConfirmationModal = ({ onConfirm, onCancel }) => (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity duration-300">
-        <div className="bg-neutral-900 rounded-3xl p-8 shadow-2xl border border-white/10 transform transition-all duration-300 scale-95 hover:scale-100">
-            <h2 className="text-xl font-bold text-white mb-4">Delete Chat?</h2>
-            <p className="text-gray-400 mb-6">
-                Are you sure you want to delete this chat? This action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-4">
-                <button
-                    onClick={onCancel}
-                    className="px-5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white font-medium transition-all duration-200 transform hover:scale-105"
-                >
-                    Cancel
-                </button>
-                <button
-                    onClick={onConfirm}
-                    className="px-5 py-2 rounded-full bg-neutral-200 hover:bg-white text-black font-semibold transition-all duration-200 transform hover:scale-105"
-                >
-                    Delete
-                </button>
-            </div>
-        </div>
-    </div>
-);
-
-const Sidebar = ({ chats, onSelectChat, onCreateNewChat, activeChatId, onDeleteClick }) => (
-    <div className="group relative w-14 hover:w-64 transition-all duration-300 ease-in-out bg-neutral-950 p-2 flex flex-col h-full border-r border-white/10">
-        <div className="flex-shrink-0">
-            <button
-                onClick={onCreateNewChat}
-                className="cursor-pointer w-full bg-white/5 hover:bg-white/10 text-white font-bold h-10 rounded-full mb-4 transition-all duration-300 flex items-center justify-center group-hover:justify-start group-hover:px-4 transform hover:scale-105 gap-2"
-            >
-                <span>
-                    <svg className="w-6 h-6 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                </span>
-                <span className="opacity-0 w-0 group-hover:opacity-100 group-hover:w-auto transition-all duration-200 delay-100 whitespace-nowrap overflow-hidden ">
-                    New Chat
-                </span>
-            </button>
-        </div>
-        <div className="flex-grow overflow-y-auto overflow-x-hidden">
-            <h2 className="text-xs font-semibold mb-2 text-gray-500 uppercase tracking-wider px-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200 delay-100">
-                History
-            </h2>
-            <ul>
-                {chats.map((chat) => (
-                    <li key={chat.id} className="mb-2 relative chat-item">
-                        <a
-                            href="#"
-                            onClick={(e) => {
-                                e.preventDefault();
-                                onSelectChat(chat.id);
-                            }}
-                            className={`flex items-center h-10 rounded-full text-sm transition-colors w-full ${activeChatId === chat.id ? 'bg-white/10' : 'hover:bg-white/5'
-                                } gap-2`}
-                        >
-                            <span className="w-12 h-12  flex-shrink-0 flex items-center justify-center">
-                                <svg
-                                    className="w-5 h-5 mr-2 group-hover:mr-0 group-hover:ml-2 text-gray-400"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth="2"
-                                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                                    />
-                                </svg>
-                            </span>
-                            <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 delay-100 whitespace-nowrap truncate text-gray-300 pr-4">
-                                {chat.messages[0]?.text?.slice(0, 30) || 'New Chat'}
-                            </span>
-                        </a>
-                        <button
-                            onClick={() => onDeleteClick(chat.id)}
-                            className="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-gray-500 hover:bg-white/5 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center"
-                        >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="2"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                />
-                            </svg>
-                        </button>
-                    </li>
-                ))}
-            </ul>
-        </div>
-    </div>
-);
-
-const ChatInput = ({ onSend, disabled, onStop }) => {
-    const [input, setInput] = useState('');
-    const [files, setFiles] = useState([]);
-    const fileInputRef = useRef(null);
-    const [isDragging, setIsDragging] = useState(false);
-    const textareaRef = useRef(null);
-
-    useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-        }
-    }, [input]);
-
-    const handleFileChange = (newFiles) => {
-        const imageFiles = Array.from(newFiles).filter(file => file.type.startsWith('image/'));
-        if (imageFiles.length > 0) {
-            setFiles(prev => [...prev, ...imageFiles]);
-        }
-    };
-
-    useEffect(() => {
-        const handleDragOver = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-                setIsDragging(true);
-            }
-        };
-
-        const handleDragLeave = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (!e.relatedTarget || e.relatedTarget.nodeName === "HTML") {
-                setIsDragging(false);
-            }
-        };
-
-        const handleDrop = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDragging(false);
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                handleFileChange(e.dataTransfer.files);
-                e.dataTransfer.clearData();
-            }
-        };
-
-        window.addEventListener('dragover', handleDragOver);
-        window.addEventListener('dragleave', handleDragLeave);
-        window.addEventListener('drop', handleDrop);
-
-        return () => {
-            window.removeEventListener('dragover', handleDragOver);
-            window.removeEventListener('dragleave', handleDragLeave);
-            window.removeEventListener('drop', handleDrop);
-        };
-    }, []);
-
-
-    const handleSend = () => {
-        if (!input.trim() && files.length === 0) return;
-        onSend({ text: input, files });
-        setInput('');
-        setFiles([]);
-    };
-
-    const removeFile = (index) => {
-        setFiles(prev => prev.filter((_, i) => i !== index));
-    };
-
-    return (
-        <div className="w-full max-w-3xl mx-auto">
-            {isDragging && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center pointer-events-none">
-                    <div className="bg-white/90 text-black px-6 py-3 rounded-xl text-lg font-medium border border-gray-300 shadow-lg">
-                        Drop image(s) to upload
-                    </div>
-                </div>
-            )}
-
-            {files.length > 0 && (
-                <div className="mb-2 p-2 bg-neutral-800/50 rounded-2xl flex items-center gap-4 overflow-x-auto animate-fade-in-up">
-                    {files.map((file, index) => (
-                        <div key={index} className="relative flex-shrink-0">
-                            <img
-                                src={URL.createObjectURL(file)}
-                                alt="Upload preview"
-                                className="w-20 h-20 object-cover rounded-xl border-2 border-white/10"
-                            />
-                            <button
-                                onClick={() => removeFile(index)}
-                                className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white hover:bg-red-700"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            <div className="relative flex items-center bg-neutral-900/80 border border-white/10 rounded-xl shadow-sm  focus-within:ring-2 focus-within:ring-white/20 transition-shadow">
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="cursor-pointer ml-2 p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                    aria-label="Upload image"
-                >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                    </svg>
-                </button>
-                <input
-                    type="file"
-                    multiple
-                    ref={fileInputRef}
-                    onChange={(e) => handleFileChange(e.target.files)}
-                    accept="image/png, image/jpeg"
-                    className="hidden"
-                />
-                <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSend();
-                        }
-                    }}
-                    placeholder="Send a message..."
-                    rows={1}
-                    className="flex-1 bg-transparent text-white placeholder-neutral-500 focus:outline-none resize-none px-2 py-3.5"
-                    style={{ maxHeight: '200px' }}
-                    disabled={disabled}
-                />
-                {disabled ? (
-                    <button
-                        onClick={onStop}
-                        className="cursor-pointer bg-white/10 text-white w-11 h-11 rounded-full flex items-center justify-center mr-1 mb-1 hover:bg-white/20 transition-colors self-end"
-                        aria-label="Stop generation"
-                    >
-                        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M5 5a1 1 0 011-1h8a1 1 0 011 1v8a1 1 0 01-1 1H6a1 1 0 01-1-1V5z" clipRule="evenodd" />
-                        </svg>
-                    </button>
-                ) : (
-                    <button
-                        onClick={handleSend}
-                        disabled={!input.trim() && files.length === 0}
-                        className="cursor-pointer bg-white text-black w-11 h-11 mr-1 mb-1 rounded-full flex items-center justify-center disabled:bg-neutral-800 disabled:text-gray-500 disabled:cursor-not-allowed hover:bg-gray-200 transition-all duration-200 self-end transform"
-                        aria-label="Send message"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h14M12 5l7 7-7 7" />
-                        </svg>
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-};
-
-
-const CopyableCodeBlock = ({ code, language = 'java' }) => {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = () => {
-        const textArea = document.createElement('textarea');
-        textArea.value = code;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy text: ', err);
-        }
-        document.body.removeChild(textArea);
-    };
-
-    return (
-        <div
-            className="relative bg-neutral-900 border border-white/10 text-white rounded-lg p-4 mb-4 group"
-            tabIndex={0}
-        >
-            <button
-                onClick={handleCopy}
-                className="absolute top-2 right-2 p-2 rounded-lg bg-neutral-800 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-neutral-700"
-                aria-label="Copy code"
-            >
-                {copied ? (
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4 text-green-400"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                    >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                ) : (
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                    >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                )}
-            </button>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordWrap: 'break-word' }}>
-                <code className={`language-${language}`}>{code}</code>
-            </pre>
-        </div>
-    );
-};
-
-const ChatMessage = ({ message }) => {
-    const { text, sender, images, thinking } = message;
-    const isUser = sender === 'user';
-
-    return (
-        <div className={`flex items-start gap-4 p-4 my-2 animate-fade-in-up ${isUser ? 'justify-end' : ''}`}>
-            {!isUser && (
-                <div
-                    className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-lg shadow-md bg-neutral-700 text-white"
-                >
-                    AI
-                </div>
-            )}
-
-            <div className={`flex flex-col gap-2 max-w-prose ${isUser ? 'items-end' : 'items-start'}`}>
-                {thinking && (
-                    <details className="mb-3 bg-neutral-900/50 border border-white/10 rounded-lg">
-                        <summary className="cursor-pointer p-3 text-sm text-gray-400 font-medium list-none flex items-center gap-2 hover:text-white">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Show thinking
-                        </summary>
-                        <pre className="p-4 pt-0 text-gray-300 text-xs whitespace-pre-wrap font-sans">{thinking}</pre>
-                    </details>
-                )}
-
-                {images && images.length > 0 && (
-                    <div className="flex gap-2 flex-wrap">
-                        {images.map((image, index) => (
-                            <img key={index} src={image} alt={`User upload ${index + 1}`} className="w-auto h-auto max-w-xs max-h-48 rounded-2xl border-2 border-white/10" />
-                        ))}
-                    </div>
-                )}
-
-                {text && (
-                    <div className={`p-4 rounded-3xl ${isUser ? 'bg-neutral-600 text-white rounded-br-none' : 'bg-neutral-800 rounded-bl-none'}`}>
-                        <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                                p({ node, children }) {
-                                    // Only render <p> when children are not a block code element.
-                                    // If this paragraph only contains a code block, skip the <p>
-                                    if (
-                                        node.children &&
-                                        node.children.length === 1 &&
-                                        node.children[0].tagName === 'code'
-                                    ) {
-                                        return <>{children}</>;
-                                    }
-                                    return <p className="mb-2 last:mb-0">{children}</p>;
-                                },
-                                code({ node, inline, className, children, ...props }) {
-                                    const language = /language-(\w+)/.exec(className || '')?.[1] || '';
-                                    if (!inline) {
-                                        return (
-                                            <CopyableCodeBlock
-                                                code={String(children).replace(/\n$/, '')}
-                                                language={language}
-                                            />
-                                        );
-                                    }
-                                    return (
-                                        <code className="bg-black/20 px-1 py-0.5 rounded-sm" {...props}>
-                                            {children}
-                                        </code>
-                                    );
-                                },
-                            }}
-                        >
-                            {text}
-                        </ReactMarkdown>
-
-
-                    </div>
-                )}
-            </div>
-            {isUser && (
-                <div
-                    className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-lg shadow-md bg-white text-black"
-                >
-                    AN
-                </div>
-            )}
-        </div>
-    );
-};
+import ChatInput from '@components/ChatInput';
+import ChatMessage from '@components/ChatMessage';
+import ModelSelector from '@components/ModelSelector';
+import Sidebar from '@components/Sidebar';
+import UserMenu from '@components/UserMenu';
+import SettingsModal from '@components/SettingsModal';
+import AuthOverlay from '@components/AuthOverlay';
+import DeleteConfirmationModal from '@components/DeleteConfirmationModal';
+import AgentStepVisualizer, { AgentModeToggle, useAgentSteps } from '@components/AgentStepVisualizer';
+import WakeWordIndicator from '@components/WakeWordIndicator';
+import VoiceModeOverlay from '@components/VoiceModeOverlay';
+import { auth, db } from '@/lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { classifyTask, getModelLabel } from '@/utils/taskClassifier';
+import { initTTS, speak, stopSpeaking, isSpeechSynthesisSupported, createStreamingTTS } from '@/utils/voiceUtils';
+import { runAgentTools } from '@/utils/agentTools';
 
 // --- Main App Component ---
 
@@ -484,57 +27,277 @@ export default function App() {
     const [activeChatId, setActiveChatId] = useState(null);
     const [isAIGenerating, setIsAIGenerating] = useState(false);
     const [chatToDelete, setChatToDelete] = useState(null);
+    const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
     const [abortController, setAbortController] = useState(null);
-    const [selectedModel, setSelectedModel] = useState('llava:latest');
+    const [selectedModel, setSelectedModel] = useState('auto');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [editingMessage, setEditingMessage] = useState(null);
     const chatEndRef = useRef(null);
     const runningRef = useRef(true);
+    const [hasTTSSupport, setHasTTSSupport] = useState(false);
+    const lastSpokenRef = useRef(null);
+    const streamingTTSRef = useRef(null);
 
+    // Auth State
+    const [user, setUser] = useState(null);
+    const [authLoading, setAuthLoading] = useState(true);
+    const [showSettings, setShowSettings] = useState(false);
+
+    // Agent Mode State
+    const [agentModeEnabled, setAgentModeEnabled] = useState(false);
+    const { steps: agentSteps, isThinking: agentThinking, handleSSEEvent, reset: resetAgentSteps } = useAgentSteps();
+
+    // Wake Word State
+    const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+    const chatInputRef = useRef(null);
+
+    // Voice Mode Overlay State
+    const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+
+    // Check if Firebase is configured and user is logged in
+    const useFirebasePersistence = Boolean(
+        user?.uid &&
+        process.env.NEXT_PUBLIC_FIREBASE_API_KEY
+    );
+
+    // Firebase Auth listener
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+            setUser(firebaseUser);
+            setAuthLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    // Initialize TTS on mount
+    useEffect(() => {
+        const setupTTS = async () => {
+            if (isSpeechSynthesisSupported()) {
+                setHasTTSSupport(true);
+                await initTTS();
+            }
+        };
+        setupTTS();
+    }, []);
+
+    // Sidebar visibility on resize
+    useEffect(() => {
+        const checkSize = () => {
+            setIsSidebarOpen(window.innerWidth >= 768);
+        };
+        checkSize();
+        window.addEventListener('resize', checkSize);
+        return () => window.removeEventListener('resize', checkSize);
+    }, []);
+
+    // Scroll to end on chat update/generation
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chats, isAIGenerating]);
 
+    // Load chats (Firestore when authed, otherwise localStorage)
     useEffect(() => {
-        try {
-            const savedChats = localStorage.getItem('chats');
-            if (savedChats) {
-                const parsedChats = JSON.parse(savedChats);
-                if (parsedChats.length > 0) {
-                    setChats(parsedChats);
-                    setActiveChatId(parsedChats[0].id);
+        let cancelled = false;
+
+        const loadFromLocalStorage = () => {
+            try {
+                const savedChats = localStorage.getItem('chats');
+                if (savedChats) {
+                    const parsedChats = JSON.parse(savedChats);
+                    if (Array.isArray(parsedChats) && parsedChats.length > 0) {
+                        if (!cancelled) {
+                            setChats(parsedChats);
+                            setActiveChatId(parsedChats[0].id);
+                        }
+                        return true;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load chats from localStorage', error);
+            }
+            return false;
+        };
+
+        const loadFromFirestore = async () => {
+            if (!user?.uid) return;
+
+            console.log('[Firestore] Loading chats for user:', user.uid);
+
+            try {
+                const chatsRef = collection(db, 'chats');
+                const q = query(
+                    chatsRef,
+                    where('userId', '==', user.uid),
+                    orderBy('updatedAt', 'desc')
+                );
+                const snapshot = await getDocs(q);
+
+                const loadedChats = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data(),
+                    messages: []
+                }));
+
+                console.log('[Firestore] Loaded chats:', loadedChats.length);
+
+                if (cancelled) return;
+
+                if (loadedChats.length === 0) {
+                    // Create initial chat
+                    const newChatRef = await addDoc(collection(db, 'chats'), {
+                        userId: user.uid,
+                        title: 'New Chat',
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp()
+                    });
+
+                    if (!cancelled) {
+                        const newChat = { id: newChatRef.id, title: 'New Chat', messages: [] };
+                        setChats([newChat]);
+                        setActiveChatId(newChatRef.id);
+                    }
                     return;
                 }
-            }
-        } catch (error) {
-            console.error('Failed to load chats from localStorage', error);
-        }
-        createNewChat();
-    }, []);
 
+                setChats(loadedChats);
+                setActiveChatId(loadedChats[0].id);
+            } catch (error) {
+                console.error('[Firestore] Failed to load chats:', error);
+                // Fallback to localStorage
+                loadFromLocalStorage();
+            }
+        };
+
+        (async () => {
+            if (useFirebasePersistence) {
+                await loadFromFirestore();
+            } else {
+                const loaded = loadFromLocalStorage();
+                if (!loaded) createNewChat();
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [useFirebasePersistence, user?.uid]);
+
+    // Save chats to localStorage (guest mode only)
     useEffect(() => {
+        if (useFirebasePersistence) return;
         if (chats.length > 0) {
             localStorage.setItem('chats', JSON.stringify(chats));
         } else {
             localStorage.removeItem('chats');
         }
-    }, [chats]);
+    }, [chats, useFirebasePersistence]);
+
+    // Load messages for the active chat (Firestore)
+    useEffect(() => {
+        if (!useFirebasePersistence || !activeChatId) return;
+
+        // Ensure activeChatId is a valid string
+        if (typeof activeChatId !== 'string' || !activeChatId.trim()) {
+            console.warn('[Firestore] Invalid activeChatId:', activeChatId);
+            return;
+        }
+
+        let cancelled = false;
+
+        const loadMessages = async () => {
+            try {
+                const messagesRef = collection(db, 'chats', String(activeChatId), 'messages');
+                const q = query(messagesRef, orderBy('createdAt', 'asc'));
+                const snapshot = await getDocs(q);
+
+                if (cancelled) return;
+
+                const mapped = snapshot.docs.map((doc) => ({
+                    id: doc.id,
+                    sender: doc.data().role,
+                    text: doc.data().content,
+                    images: doc.data().images || [],
+                    created_at: doc.data().createdAt?.toDate?.()
+                }));
+
+                setChats((prevChats) =>
+                    prevChats.map((chat) =>
+                        chat.id === activeChatId ? { ...chat, messages: mapped } : chat
+                    )
+                );
+            } catch (error) {
+                console.error('Failed to load messages from Firestore', error);
+            }
+        };
+
+        loadMessages();
+        return () => {
+            cancelled = true;
+        };
+    }, [useFirebasePersistence, activeChatId]);
 
     const createNewChat = async () => {
+        // Reset backend memory for fresh conversation
         try {
             await fetch('/api/reset', { method: 'POST' });
-
-            const newChat = {
-                id: Date.now(),
-                messages: [],
-            };
-            setChats((prev) => [newChat, ...prev]);
-            setActiveChatId(newChat.id);
         } catch (err) {
             console.error('Failed to reset backend memory:', err);
         }
+
+        if (useFirebasePersistence) {
+            try {
+                const newChatRef = await addDoc(collection(db, 'chats'), {
+                    userId: user.uid,
+                    title: 'New Chat',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+
+                const newChat = { id: newChatRef.id, title: 'New Chat', messages: [] };
+                setChats((prev) => [newChat, ...prev]);
+                setActiveChatId(newChatRef.id);
+                return newChatRef.id;
+            } catch (error) {
+                console.error('Failed to create chat in Firestore', error);
+                return null;
+            }
+        }
+
+        // Use UUID for localStorage
+        const newChatId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `local-${Date.now()}`;
+        const newChat = {
+            id: newChatId,
+            title: 'New Chat',
+            messages: [],
+        };
+        setChats((prev) => [newChat, ...prev]);
+        setActiveChatId(newChat.id);
+        return newChat.id;
     };
 
-    const handleDeleteChat = () => {
+    const handleDeleteChat = async () => {
         if (!chatToDelete) return;
+
+        if (useFirebasePersistence) {
+            try {
+                // Delete messages subcollection first
+                const messagesRef = collection(db, 'chats', chatToDelete, 'messages');
+                const messagesSnapshot = await getDocs(messagesRef);
+                const batch = writeBatch(db);
+                messagesSnapshot.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+
+                // Delete the chat document
+                await deleteDoc(doc(db, 'chats', chatToDelete));
+            } catch (e) {
+                console.error('Failed to delete chat in Firestore', e);
+            }
+        }
+
         const newChats = chats.filter((chat) => chat.id !== chatToDelete);
         setChats(newChats);
         if (activeChatId === chatToDelete) {
@@ -547,8 +310,77 @@ export default function App() {
         setChatToDelete(null);
     };
 
+    const handleDeleteAllChats = async () => {
+        if (useFirebasePersistence) {
+            try {
+                // Delete all user's chats
+                const chatsRef = collection(db, 'chats');
+                const q = query(chatsRef, where('userId', '==', user.uid));
+                const snapshot = await getDocs(q);
+
+                for (const chatDoc of snapshot.docs) {
+                    // Delete messages
+                    const messagesRef = collection(db, 'chats', chatDoc.id, 'messages');
+                    const messagesSnapshot = await getDocs(messagesRef);
+                    const batch = writeBatch(db);
+                    messagesSnapshot.docs.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+                    // Delete chat
+                    await deleteDoc(chatDoc.ref);
+                }
+
+                // Create new initial chat
+                const newChatRef = await addDoc(collection(db, 'chats'), {
+                    userId: user.uid,
+                    title: 'New Chat',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+
+                setChats([{ id: newChatRef.id, title: 'New Chat', messages: [] }]);
+                setActiveChatId(newChatRef.id);
+                setShowDeleteAllModal(false);
+                return;
+            } catch (e) {
+                console.error('Delete-all failed', e);
+            }
+        }
+
+        const newChatId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `local-${Date.now()}`;
+        const newChat = { id: newChatId, title: 'New Chat', messages: [] };
+        setChats([newChat]);
+        setActiveChatId(newChat.id);
+        setShowDeleteAllModal(false);
+    };
+
+    const handleRenameChat = async (chatId, newTitle) => {
+        setChats(prevChats =>
+            prevChats.map(chat =>
+                chat.id === chatId ? { ...chat, title: newTitle } : chat
+            )
+        );
+
+        if (useFirebasePersistence) {
+            try {
+                await updateDoc(doc(db, 'chats', chatId), {
+                    title: newTitle,
+                    updatedAt: serverTimestamp()
+                });
+            } catch (error) {
+                console.error('Failed to rename chat in Firestore', error);
+            }
+        }
+    };
+
     const handleStopGeneration = () => {
         runningRef.current = false;
+        stopSpeaking();
+        if (streamingTTSRef.current) {
+            streamingTTSRef.current.stop();
+            streamingTTSRef.current = null;
+        }
         if (abortController) {
             abortController.abort();
             setIsAIGenerating(false);
@@ -564,45 +396,177 @@ export default function App() {
         );
     };
 
-    const handleSendMessage = async ({ text, files }) => {
+    const handleEditMessage = (messageId, text) => {
+        const activeChat = chats.find(c => c.id === activeChatId);
+        if (!activeChat) return;
+
+        const messageIndex = activeChat.messages.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) return;
+
+        setEditingMessage({ id: messageId, text, messageIndex });
+    };
+
+    const handleSendMessage = async ({ text, files, documents = [], inputMethod }) => {
+        console.log('[handleSendMessage] Called with:', { text, filesCount: files.length, documentsCount: documents.length, inputMethod });
+
+        let chatId = activeChatId;
+        if (!chatId) {
+            console.log('[handleSendMessage] No active chat, creating new one...');
+            try {
+                chatId = await createNewChat();
+                console.log('[handleSendMessage] Created new chat:', chatId);
+            } catch (err) {
+                console.error('[handleSendMessage] Failed to create chat:', err);
+            }
+        }
+
+        if (!chatId) {
+            if (chats.length > 0) {
+                chatId = chats[0].id;
+            } else {
+                alert('Please sign in or create a chat first');
+                return;
+            }
+        }
+
         runningRef.current = true;
+        const shouldSpeak = inputMethod === 'voice' && hasTTSSupport;
 
-        const imagePromises = files.map(file => {
-            return new Promise((resolve, reject) => {
+        // Convert files to base64 for now (simplified - no Supabase storage)
+        let imageUrls = [];
+        for (const fileItem of files) {
+            if (fileItem.file) {
                 const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        });
+                const base64 = await new Promise((resolve) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(fileItem.file);
+                });
+                imageUrls.push(base64);
+            }
+        }
 
-        const images = await Promise.all(imagePromises);
+        const userMessageId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : String(Date.now());
 
         const userMessage = {
-            id: Date.now(),
+            id: userMessageId,
             sender: 'user',
             text: text.trim(),
-            images: images,
+            images: imageUrls,
+            documents: [],
         };
 
-        const activeChat = chats.find((chat) => chat.id === activeChatId);
-        const updatedMessages = [...(activeChat?.messages || []), userMessage];
+        let activeChat = chats.find((chat) => chat.id === chatId);
+        if (!activeChat) {
+            activeChat = { id: chatId, messages: [], title: 'New Chat' };
+        }
 
+        let baseMessages = activeChat?.messages || [];
+        if (editingMessage?.messageIndex !== undefined) {
+            // Delete truncated messages from Firestore
+            if (useFirebasePersistence) {
+                const toDelete = baseMessages.slice(editingMessage.messageIndex);
+                for (const msg of toDelete) {
+                    if (msg.id) {
+                        try {
+                            await deleteDoc(doc(db, 'chats', chatId, 'messages', msg.id));
+                        } catch (e) {
+                            console.error('Failed to delete message', e);
+                        }
+                    }
+                }
+            }
+            baseMessages = baseMessages.slice(0, editingMessage.messageIndex);
+        }
+
+        const updatedMessages = [...baseMessages, userMessage];
         updateChatMessages(updatedMessages);
+        setEditingMessage(null);
         setIsAIGenerating(true);
+
+        // Persist user message to Firestore
+        if (useFirebasePersistence) {
+            try {
+                await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                    role: 'user',
+                    content: userMessage.text,
+                    images: imageUrls.length ? imageUrls : null,
+                    createdAt: serverTimestamp()
+                });
+
+                // Auto-title if still default
+                const activeChatRow = chats.find((c) => c.id === chatId);
+                const maybeTitle = (activeChatRow?.title && activeChatRow.title !== 'New Chat')
+                    ? null
+                    : (userMessage.text || '').slice(0, 40);
+
+                await updateDoc(doc(db, 'chats', chatId), {
+                    updatedAt: serverTimestamp(),
+                    ...(maybeTitle ? { title: maybeTitle } : {})
+                });
+
+                if (maybeTitle) {
+                    setChats(prev => prev.map(c => (c.id === chatId ? { ...c, title: maybeTitle } : c)));
+                }
+            } catch (error) {
+                console.error('Failed to persist message to Firestore', error);
+            }
+        }
 
         const controller = new AbortController();
         setAbortController(controller);
 
+        let modelToUse = selectedModel;
+        let autoSelectReason = null;
+
+        if (selectedModel === 'auto') {
+            const hasImage = imageUrls.length > 0;
+            const classification = classifyTask(userMessage.text, hasImage);
+            modelToUse = classification.model;
+            autoSelectReason = classification.reason;
+        }
+
+        // Run agent tools
+        let toolResult = null;
         try {
+            toolResult = await runAgentTools(text, user?.uid, null);
+            if (toolResult) {
+                console.log('[Agent] Tool executed:', toolResult);
+            }
+        } catch (e) {
+            console.error('[Agent] Tool execution failed:', e);
+        }
+
+        try {
+            let finalContent = text;
+
+            if (documents?.length) {
+                const docsBlock = documents
+                    .map((doc, i) => {
+                        const name = doc?.name ? String(doc.name) : `document-${i + 1}.pdf`;
+                        const docText = doc?.text ? String(doc.text) : '';
+                        return `[${name}]\n${docText}`;
+                    })
+                    .join('\n\n');
+
+                finalContent += `\n\n<user_documents>\n${docsBlock}\n</user_documents>`;
+            }
+
+            if (toolResult) {
+                finalContent += `\n\n<system_tool_output>\n${toolResult}\n</system_tool_output>`;
+            }
+
             const res = await fetch('/api/chat', {
                 method: 'POST',
-                body: JSON.stringify({
-                    prompt: userMessage.text,
-                    image_data: images[0] || null, // Sending only the first image for now
-                    model: selectedModel,
-                }),
                 headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: finalContent,
+                    file_data: imageUrls[0] || null,
+                    model: modelToUse,
+                    chat_id: String(chatId),
+                    voice_mode: inputMethod === 'voice',
+                }),
                 signal: controller.signal,
             });
 
@@ -611,9 +575,7 @@ export default function App() {
                 try {
                     const errorData = await res.json();
                     errorText = errorData.details || errorData.error || errorText;
-                } catch (e) {
-                    // Not a JSON response, do nothing extra
-                }
+                } catch (e) { }
                 throw new Error(errorText);
             }
 
@@ -621,10 +583,20 @@ export default function App() {
             const decoder = new TextDecoder('utf-8');
 
             let aiMessage = null;
+            let aiMessageId = null;
+
+            if (shouldSpeak) {
+                streamingTTSRef.current = createStreamingTTS();
+            }
 
             while (true) {
                 const { value, done } = await reader.read();
-                if (done) break;
+                if (done) {
+                    if (shouldSpeak && streamingTTSRef.current) {
+                        streamingTTSRef.current.finish();
+                    }
+                    break;
+                }
 
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n').filter((line) => line.trim() !== '');
@@ -638,19 +610,24 @@ export default function App() {
 
                         if (json.token && runningRef.current) {
                             if (!aiMessage) {
+                                aiMessageId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                                    ? crypto.randomUUID()
+                                    : String(Date.now() + 1);
+                                const modelDisplayName = getModelLabel(modelToUse);
+                                const headerText = autoSelectReason
+                                    ? `**${modelDisplayName}** _${autoSelectReason}_`
+                                    : `**${modelDisplayName}**`;
                                 aiMessage = {
-                                    id: Date.now() + 1,
+                                    id: aiMessageId,
                                     sender: 'assistant',
-                                    text: `**[${selectedModel}]**\n\n${json.token}`,
+                                    text: `${headerText}\n\n${json.token}`,
                                 };
                                 updateChatMessages([...updatedMessages, aiMessage]);
                             } else {
                                 aiMessage.text += json.token;
-
                                 setChats(prevChats => {
                                     return prevChats.map(chat => {
-                                        if (chat.id !== activeChatId) return chat;
-
+                                        if (chat.id !== chatId) return chat;
                                         const messages = chat.messages.slice(0, -1);
                                         return {
                                             ...chat,
@@ -658,23 +635,51 @@ export default function App() {
                                         };
                                     });
                                 });
+
+                                if (shouldSpeak && streamingTTSRef.current) {
+                                    streamingTTSRef.current.addChunk(aiMessage.text);
+                                }
                             }
                         }
 
+                        if (json.error) {
+                            throw new Error(json.error);
+                        }
                     } catch (err) {
-                        console.error('Invalid JSON chunk:', line);
+                        if (err.message.includes('JSON')) {
+                            console.warn('Invalid JSON chunk:', line);
+                        } else {
+                            throw err;
+                        }
                     }
+                }
+            }
+
+            // Persist assistant message
+            if (useFirebasePersistence && aiMessage?.text) {
+                try {
+                    await addDoc(collection(db, 'chats', chatId, 'messages'), {
+                        role: 'assistant',
+                        content: aiMessage.text,
+                        createdAt: serverTimestamp()
+                    });
+
+                    await updateDoc(doc(db, 'chats', chatId), {
+                        updatedAt: serverTimestamp()
+                    });
+                } catch (error) {
+                    console.error('Failed to persist assistant message', error);
                 }
             }
         } catch (err) {
             if (err.name === 'AbortError') {
-                console.log('Generation stopped.');
+                console.log('[handleSendMessage] Generation stopped by user.');
             } else {
-                console.error('Error details:', err.message);
+                console.error('[handleSendMessage] Error:', err.message);
                 const errorResponseMessage = {
                     id: Date.now() + 1,
                     sender: 'assistant',
-                    text: err.message, // Use the detailed error message
+                    text: `Sorry, I ran into an error.\n\n**Details:**\n\`\`\`\n${err.message}\n\`\`\``,
                 };
                 updateChatMessages([...updatedMessages, errorResponseMessage]);
             }
@@ -685,10 +690,8 @@ export default function App() {
     };
 
     const activeChat = chats.find((chat) => chat.id === activeChatId);
-
     const lastMessage = activeChat?.messages[activeChat.messages.length - 1];
     const showTypingIndicator = isAIGenerating && lastMessage?.sender === 'user';
-
 
     const TypingIndicator = () => (
         <div className="flex items-start gap-4 p-4 my-2">
@@ -709,6 +712,16 @@ export default function App() {
                 <DeleteConfirmationModal
                     onConfirm={handleDeleteChat}
                     onCancel={() => setChatToDelete(null)}
+                    title="Delete Chat?"
+                    message="Are you sure you want to delete this chat? This action cannot be undone."
+                />
+            )}
+            {showDeleteAllModal && (
+                <DeleteConfirmationModal
+                    onConfirm={handleDeleteAllChats}
+                    onCancel={() => setShowDeleteAllModal(false)}
+                    title="Delete All Chats?"
+                    message="Are you sure you want to delete all your chats? This action is permanent and cannot be undone."
                 />
             )}
             <Sidebar
@@ -717,64 +730,114 @@ export default function App() {
                 onCreateNewChat={createNewChat}
                 activeChatId={activeChatId}
                 onDeleteClick={setChatToDelete}
+                onRenameChat={handleRenameChat}
+                isOpen={isSidebarOpen}
+                setIsOpen={setIsSidebarOpen}
+                onDeleteAllClick={() => setShowDeleteAllModal(true)}
             />
             <div className="flex-1 flex flex-col h-screen bg-neutral-950">
                 <header className="flex items-center justify-between p-3 border-b border-white/10 flex-shrink-0">
-                    <ModelSelector model={selectedModel} setModel={setSelectedModel} />
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 rounded-full md:hidden hover:bg-white/10">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                            </svg>
+                        </button>
+                        <ModelSelector model={selectedModel} setModel={setSelectedModel} />
+                        <AgentModeToggle
+                            isEnabled={agentModeEnabled}
+                            onToggle={() => setAgentModeEnabled(!agentModeEnabled)}
+                        />
+                    </div>
                     <div className="flex items-center gap-3">
-                        <span className="text-md font-medium text-gray-300">Arush Nandakumar Menon</span>
-                        <div className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center font-bold text-sm">
-                            AN
-                        </div>
+                        <WakeWordIndicator
+                            enabled={wakeWordEnabled}
+                            onWake={(command) => {
+                                const message = (command && command.trim())
+                                    ? command.trim()
+                                    : "Hey! I just said your name.";
+                                handleSendMessage({ text: message, files: [], inputMethod: 'voice' });
+                            }}
+                            onToggle={() => setWakeWordEnabled(!wakeWordEnabled)}
+                        />
+                        <UserMenu user={user} onOpenSettings={() => setShowSettings(true)} />
                     </div>
                 </header>
-                <main className="flex-1 flex flex-col overflow-hidden">
-                    {activeChat && activeChat.messages.length > 0 ? (
-                        <>
-                            <div className="flex-1 overflow-y-auto p-6">
-                                <div className="max-w-3xl mx-auto">
-                                    {activeChat.messages.map((msg) => (
-                                        <ChatMessage key={msg.id} message={msg} />
-                                    ))}
 
-                                    {showTypingIndicator && <TypingIndicator />}
+                {!user ? (
+                    <AuthOverlay />
+                ) : (
+                    <main className="flex-1 flex flex-col overflow-hidden relative">
+                        <div className="flex-1 overflow-y-auto custom-scrollbar py-4 md:py-6 px-4 md:px-20 lg:px-32">
+                            {activeChat && activeChat.messages.length > 0 ? (
+                                <>
+                                    <div className="mx-auto w-full max-w-4xl space-y-4">
+                                        {(() => {
+                                            const lastUserMsgIndex = activeChat.messages
+                                                .map((m, i) => m.sender === 'user' ? i : -1)
+                                                .filter(i => i !== -1)
+                                                .pop();
 
-                                    <div ref={chatEndRef} />
+                                            return activeChat.messages.map((msg, index) => (
+                                                <ChatMessage
+                                                    key={msg.id}
+                                                    message={msg}
+                                                    user={user}
+                                                    onEdit={!isAIGenerating && index === lastUserMsgIndex ? handleEditMessage : undefined}
+                                                />
+                                            ));
+                                        })()}
+                                        {showTypingIndicator && <TypingIndicator />}
+                                        {agentModeEnabled && (agentThinking || agentSteps.length > 0) && (
+                                            <AgentStepVisualizer steps={agentSteps} isThinking={agentThinking} />
+                                        )}
+                                        <div ref={chatEndRef} />
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
+                                    <div className="w-16 h-16 mb-4 bg-neutral-800 rounded-full flex items-center justify-center">
+                                        <span className="text-2xl">✨</span>
+                                    </div>
+                                    <h2 className="text-xl font-bold text-white mb-2">How can I help you?</h2>
                                 </div>
-                            </div>
-                            <div className="p-6 bg-neutral-950/50 backdrop-blur-sm border-t border-white/10">
+                            )}
+                        </div>
+
+                        <div className="pt-4 px-4 md:px-20 lg:px-32 w-full flex-shrink-0 bg-neutral-950/80 backdrop-blur-md">
+                            <div className="w-full max-w-4xl mx-auto">
                                 <ChatInput
-                                    onSend={handleSendMessage}
+                                    ref={chatInputRef}
+                                    onSend={(data) => {
+                                        handleSendMessage(data);
+                                        setEditingMessage(null);
+                                    }}
                                     disabled={isAIGenerating}
                                     onStop={handleStopGeneration}
+                                    initialText={editingMessage?.text || ''}
+                                    isEditing={Boolean(editingMessage)}
+                                    onCancelEdit={() => setEditingMessage(null)}
+                                    onOpenVoiceMode={() => setVoiceModeOpen(true)}
                                 />
                             </div>
-                        </>
-                    ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center bg-neutral-950">
-                            <div className="w-full max-w-3xl flex flex-col items-center text-center">
-                                <div className="w-16 h-16 mb-2 bg-neutral-800 rounded-full flex items-center justify-center shadow-lg">
-                                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path>
-                                    </svg>
-                                </div>
-                                <h2 className="text-3xl font-bold tracking-tight text-white mb-2">
-                                    What's on the agenda today?
-                                </h2>
-                                <p className="text-gray-400 mb-6">Start a new conversation or upload an image to begin.</p>
-                                <div className="w-full">
-                                    <ChatInput
-                                        onSend={handleSendMessage}
-                                        disabled={isAIGenerating}
-                                        onStop={handleStopGeneration}
-                                    />
-                                    {isAIGenerating && <div className="text-gray-400 mt-2">AI is typing...</div>}
-                                </div>
-                            </div>
                         </div>
-                    )}
-                </main>
+                    </main>
+                )}
             </div>
+            <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} user={user} />
+
+            <VoiceModeOverlay
+                isOpen={voiceModeOpen}
+                onClose={() => setVoiceModeOpen(false)}
+                onSendMessage={(data) => handleSendMessage(data)}
+                onStop={handleStopGeneration}
+                isAIGenerating={isAIGenerating}
+                lastAIMessage={
+                    activeChat?.messages
+                        ?.filter(m => m.sender === 'assistant')
+                        ?.slice(-1)[0]?.text || ''
+                }
+            />
         </div>
     );
 }

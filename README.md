@@ -1,5 +1,29 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
+## Supabase (Auth + Chats)
+
+This app supports two persistence modes:
+
+- **Guest mode** (no login): chats are stored in `localStorage`.
+- **Signed-in mode**: chats + messages are stored in Supabase (`localmind.chats`, `localmind.messages`).
+
+### Environment variables
+
+Set these in `.env.local`:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### Database schema + RLS
+
+- The SQL schema + RLS policies are in [supabase_schema.sql](supabase_schema.sql).
+- Ensure the `localmind` schema is added to **Supabase Dashboard → Settings → API → Exposed schemas**.
+
+Notes:
+
+- Messages store `role` (`user`/`assistant`/`system`) and `content`.
+- Uploaded images are currently stored in `messages.images` as JSON (base64 strings). If you want to avoid large rows, move images to Supabase Storage and store public URLs instead.
+
 ## Getting Started
 
 First, run the development server:
