@@ -252,7 +252,7 @@ export default function VoiceModeOverlay({
                 <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
                     <span className="text-purple-300/70 text-sm font-medium">Voice Mode</span>
-                    <span className="text-purple-500/40 text-xs">• Say "stop" to pause</span>
+                    <span className="text-purple-500/40 text-xs">• Say &quot;stop&quot; to pause</span>
                 </div>
                 <button
                     onClick={endSession}

@@ -283,7 +283,7 @@ const SettingsModal = ({ isOpen, onClose, user }) => {
                                 </div>
 
                                 <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-sm text-blue-300">
-                                    <strong>Tip:</strong> After connecting, try asking "What's on my calendar this week?"
+                                    <strong>Tip:</strong> After connecting, try asking &quot;What&apos;s on my calendar this week?&quot;
                                 </div>
                             </div>
                         )}

@@ -193,14 +193,14 @@ export function WakeWordSettings({ enabled, onToggle }) {
             </div>
 
             <p className="text-sm text-white/60 mb-3">
-                Say <strong>"Hey LocalMind"</strong> to activate voice input without touching keyboard.
+                Say <strong>&quot;Hey LocalMind&quot;</strong> to activate voice input without touching keyboard.
             </p>
 
             {/* Demo Warning */}
             <div className="flex items-start gap-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20">
                 <IconAlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
                 <div className="text-xs text-yellow-200/80">
-                    <strong>Demo Only:</strong> Uses Chrome's cloud speech recognition.
+                    <strong>Demo Only:</strong> Uses Chrome&apos;s cloud speech recognition.
                     Audio is processed externally. Auto-disables after 5min inactivity.
                     Not suitable for always-on use.
                 </div>

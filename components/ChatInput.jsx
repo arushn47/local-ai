@@ -430,4 +430,6 @@ const ChatInput = forwardRef(({ onSend, disabled, onStop, initialText = '', isEd
     );
 });
 
+ChatInput.displayName = 'ChatInput';
+
 export default ChatInput;
