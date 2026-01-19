@@ -2,6 +2,50 @@ export const dynamic = 'force-dynamic';
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
+function getBackendMode() {
+  // auto (default): use local if reachable, else Gemini
+  // ollama: force local only (error if unreachable)
+  // gemini: force cloud only
+  const raw = (process.env.LOCALMIND_BACKEND_MODE || 'auto').toLowerCase().trim();
+  if (raw === 'ollama' || raw === 'gemini' || raw === 'auto') return raw;
+  return 'auto';
+}
+
+function getLocalBackendBaseUrls() {
+  const envUrl =
+    process.env.LOCALMIND_BACKEND_URL ||
+    process.env.OLLAMA_BACKEND_URL ||
+    process.env.NEXT_PUBLIC_OLLAMA_BACKEND_URL;
+
+  const candidates = [
+    envUrl,
+    'http://127.0.0.1:5000',
+    'http://localhost:5000',
+    // Useful when Next runs in Docker and Flask runs on host.
+    'http://host.docker.internal:5000',
+  ].filter(Boolean);
+
+  // De-dupe while preserving order.
+  return [...new Set(candidates)];
+}
+
+async function fetchWithTimeout(url, { method = 'GET', headers, body, timeoutMs = 4000 } = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // LocalMind system prompt (matching main.py)
 const LOCALMIND_SYSTEM_PROMPT = `You are LocalMind, a sophisticated AI assistant created by Arush. You are NOT ChatGPT, Claude, Llama, Qwen, or any other AI. You are LocalMind.
 
@@ -14,7 +58,7 @@ Personality:
 
 Capabilities:
 - You can help with tasks, answer questions, write code, and have conversations
-- You have access to tools like calendar, email, tasks, notes, and web search when in agent mode
+- You have access to tools like calendar, email, tasks, notes, and web search
 - You remember context from the conversation
 
 Always be helpful, accurate, and maintain the LocalMind identity.`;
@@ -33,25 +77,21 @@ CRITICAL RULES FOR VOICE MODE:
 Remember: This is a voice conversation - keep it brief and natural.`;
 
 // Check if Ollama/Flask backend is available
-async function isOllamaAvailable() {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1500);
-
-    const res = await fetch('http://127.0.0.1:5000/health', {
-      method: 'GET',
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-    return res.ok;
-  } catch {
-    return false;
+async function resolveLocalBackendUrl() {
+  const baseUrls = getLocalBackendBaseUrls();
+  for (const baseUrl of baseUrls) {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/health`, { timeoutMs: 4000 });
+      if (res.ok) return baseUrl;
+    } catch (e) {
+      console.warn('[Chat API] Local backend probe failed:', baseUrl, e?.message || e);
+    }
   }
+  return null;
 }
 
 // Proxy request to Ollama backend (existing behavior)
-async function proxyToOllama(body) {
+async function proxyToOllama(body, baseUrl) {
   const { prompt, file_data, model, chat_id, voice_mode } = body;
 
   let processedFileData = null;
@@ -68,7 +108,7 @@ async function proxyToOllama(body) {
     }
   }
 
-  const backendResponse = await fetch('http://127.0.0.1:5000/chat', {
+  const backendResponse = await fetch(`${baseUrl}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -88,6 +128,13 @@ async function proxyToOllama(body) {
   // Re-stream from Ollama
   const stream = new ReadableStream({
     async start(controller) {
+      // Send metadata first so the client can show the actual backend/model.
+      controller.enqueue(
+        new TextEncoder().encode(
+          `data: ${JSON.stringify({ event: 'meta', backend: 'ollama', model: model || null, baseUrl })}\n\n`
+        )
+      );
+
       const reader = backendResponse.body.getReader();
       const decoder = new TextDecoder();
 
@@ -139,7 +186,7 @@ async function streamFromGemini(body) {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: GEMINI_MODEL,
     systemInstruction: voice_mode ? LOCALMIND_VOICE_PROMPT : LOCALMIND_SYSTEM_PROMPT,
   });
 
@@ -191,6 +238,12 @@ async function streamFromGemini(body) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ event: 'meta', backend: 'gemini', model: GEMINI_MODEL })}\n\n`
+          )
+        );
+
         for await (const chunk of result.stream) {
           const text = chunk.text();
           if (text) {
@@ -233,16 +286,32 @@ export async function POST(req) {
       );
     }
 
-    // Check if local Ollama is available
-    const useOllama = await isOllamaAvailable();
+    const backendMode = getBackendMode();
+    const localBackendUrl = await resolveLocalBackendUrl();
 
-    if (useOllama) {
-      console.log('[Chat API] Using Ollama backend (local)');
-      return await proxyToOllama(body);
-    } else {
-      console.log('[Chat API] Using Gemini API (cloud)');
+    if (backendMode === 'ollama') {
+      if (!localBackendUrl) {
+        throw new Error(
+          `LOCALMIND_BACKEND_MODE=ollama but local backend is not reachable. Tried: ${getLocalBackendBaseUrls().join(', ')}`
+        );
+      }
+      console.log('[Chat API] Forced local backend:', localBackendUrl);
+      return await proxyToOllama(body, localBackendUrl);
+    }
+
+    if (backendMode === 'gemini') {
+      console.log('[Chat API] Forced Gemini backend');
       return await streamFromGemini(body);
     }
+
+    // auto: prefer local if reachable
+    if (localBackendUrl) {
+      console.log('[Chat API] Using local backend:', localBackendUrl);
+      return await proxyToOllama(body, localBackendUrl);
+    }
+
+    console.log('[Chat API] Local backend not reachable, using Gemini');
+    return await streamFromGemini(body);
   } catch (error) {
     console.error('[Chat API] Error:', error.message);
     return new Response(

@@ -5,7 +5,7 @@ import json
 import re
 import base64
 import os
-from typing import Dict, Union, List, Optional
+from typing import Dict, Union, List, Optional, Any, Mapping
 from supabase import create_client, Client
 
 app = Flask(__name__)
@@ -53,7 +53,7 @@ Personality:
 
 Capabilities:
 - You can help with tasks, answer questions, write code, and have conversations
-- You have access to tools like calendar, email, tasks, notes, and web search when in agent mode
+- You have access to tools like calendar, email, tasks, notes, and web search
 - You remember context from the conversation
 
 Always be helpful, accurate, and maintain the LocalMind identity."""
@@ -89,7 +89,20 @@ def get_user_id_from_chat(chat_id: str) -> Optional[str]:
         return None
     try:
         result = supabase.from_('chats').select('user_id').eq('id', chat_id).single().execute()
-        return result.data.get('user_id') if result.data else None
+        data: Any = getattr(result, "data", None)
+
+        # Supabase may return dict-like JSON, a list of rows, or other JSON primitives depending on settings.
+        user_id_value: Any = None
+        if isinstance(data, Mapping):
+            user_id_value = data.get('user_id')
+        elif isinstance(data, list) and data and isinstance(data[0], Mapping):
+            user_id_value = data[0].get('user_id')
+
+        if user_id_value is None:
+            return None
+        if isinstance(user_id_value, str):
+            return user_id_value
+        return str(user_id_value)
     except Exception as e:
         print(f"[Supabase] Error getting user_id for chat {chat_id}: {e}")
         return None
@@ -101,9 +114,19 @@ def load_summary_from_db(user_id: str) -> str:
     
     try:
         result = supabase.from_('memories').select('content').eq('user_id', user_id).order('importance', desc=True).order('created_at', desc=True).limit(1).execute()
-        if result.data and len(result.data) > 0:
-            return result.data[0].get('content', '')
-        return ""
+        data: Any = getattr(result, "data", None)
+
+        content_value: Any = None
+        if isinstance(data, list) and data and isinstance(data[0], Mapping):
+            content_value = data[0].get('content', '')
+        elif isinstance(data, Mapping):
+            content_value = data.get('content', '')
+
+        if content_value is None:
+            return ""
+        if isinstance(content_value, str):
+            return content_value
+        return str(content_value)
     except Exception as e:
         print(f"[Supabase] Error loading memory for user {user_id}: {e}")
         return summary_store.get(user_id, "")
@@ -118,13 +141,20 @@ def save_summary_to_db(user_id: str, summary: str, importance: int = 1) -> bool:
         # Upsert memory (update if exists, insert if not)
         # First try to find existing memory
         existing = supabase.from_('memories').select('id').eq('user_id', user_id).limit(1).execute()
-        
-        if existing.data and len(existing.data) > 0:
+        existing_data: Any = getattr(existing, "data", None)
+
+        existing_id: Optional[str] = None
+        if isinstance(existing_data, list) and existing_data and isinstance(existing_data[0], Mapping):
+            row_id = existing_data[0].get('id')
+            if row_id is not None:
+                existing_id = str(row_id)
+
+        if existing_id:
             # Update existing memory
             supabase.from_('memories').update({
                 'content': summary,
                 'importance': importance
-            }).eq('id', existing.data[0]['id']).execute()
+            }).eq('id', existing_id).execute()
         else:
             # Insert new memory
             supabase.from_('memories').insert({

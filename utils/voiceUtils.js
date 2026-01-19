@@ -25,14 +25,14 @@ export const initSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
 
-    recognition.continuous = false; // Stop after one result
+    recognition.continuous = false; // Stop after one result (default)
     recognition.interimResults = true; // Show partial results
     recognition.lang = 'en-US'; // English
 
     return recognition;
 };
 
-export const startListening = (onResult, onEnd, onError) => {
+export const startListening = (onResult, onEnd, onError, options = {}) => {
     if (!recognition) {
         recognition = initSpeechRecognition();
     }
@@ -42,12 +42,35 @@ export const startListening = (onResult, onEnd, onError) => {
         return false;
     }
 
-    recognition.onresult = (event) => {
-        const transcript = Array.from(event.results)
-            .map(result => result[0].transcript)
-            .join('');
+    // Allow caller to override recognition behavior.
+    if (typeof options.continuous === 'boolean') {
+        recognition.continuous = options.continuous;
+    }
+    if (typeof options.interimResults === 'boolean') {
+        recognition.interimResults = options.interimResults;
+    }
+    if (typeof options.lang === 'string' && options.lang.trim()) {
+        recognition.lang = options.lang;
+    }
 
-        const isFinal = event.results[event.results.length - 1].isFinal;
+    recognition.onresult = (event) => {
+        // Build a stable transcript: finalized parts + current interim.
+        // This avoids some duplication patterns when interim updates fire.
+        let finalText = '';
+        let interimText = '';
+
+        for (let i = 0; i < event.results.length; i++) {
+            const res = event.results[i];
+            const t = res[0]?.transcript || '';
+            if (res.isFinal) {
+                finalText += t;
+            } else {
+                interimText += t;
+            }
+        }
+
+        const transcript = (finalText + interimText).trim();
+        const isFinal = event.results[event.results.length - 1]?.isFinal === true;
         onResult?.(transcript, isFinal);
     };
 

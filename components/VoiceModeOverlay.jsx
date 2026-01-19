@@ -29,10 +29,83 @@ export default function VoiceModeOverlay({
     const [waitingForResponse, setWaitingForResponse] = useState(false);
     const [messages, setMessages] = useState([]);
     const [lastProcessedMessage, setLastProcessedMessage] = useState('');
+    const lastProcessedMessageRef = useRef('');
 
     const chatEndRef = useRef(null);
     const statusRef = useRef(status);
     const interruptRecognitionRef = useRef(null);
+    const interruptWantedRef = useRef(false);
+
+    // Anti-echo: avoid transcribing/sending the assistant's own TTS.
+    const ignoreSttUntilRef = useRef(0);
+    const lastAssistantNormRef = useRef('');
+
+    // Voice input buffering: wait for a pause before sending.
+    const draftRef = useRef('');
+    const silenceTimerRef = useRef(null);
+    const lastSentRef = useRef('');
+
+    const SILENCE_MS_TO_SEND = 3000;
+
+    const normalize = (text) => {
+        return (text || '')
+            .toLowerCase()
+            .replace(/[\u2019']/g, "'")
+            .replace(/\s+/g, ' ')
+            .replace(/[^a-z0-9\s']/g, '')
+            .trim();
+    };
+
+    const clearSilenceTimer = () => {
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+        }
+    };
+
+    const commitDraftIfReady = useCallback(() => {
+        if (Date.now() < ignoreSttUntilRef.current) return;
+
+        const text = (draftRef.current || '').trim();
+        const norm = normalize(text);
+
+        if (!text || !norm) return;
+
+        // If STT picked up the assistant's own last message, don't send it back.
+        if (
+            lastAssistantNormRef.current &&
+            norm.length >= 12 &&
+            lastAssistantNormRef.current.includes(norm)
+        ) {
+            draftRef.current = '';
+            setTranscript('');
+            clearSilenceTimer();
+            return;
+        }
+
+        if (norm === lastSentRef.current) {
+            // Avoid duplicate sends from repeated final/interim events.
+            return;
+        }
+
+        lastSentRef.current = norm;
+
+        // Stop listening while processing/requesting.
+        stopListening();
+        clearSilenceTimer();
+
+        setMessages(prev => [...prev, { role: 'user', text }]);
+        setTranscript('');
+        draftRef.current = '';
+        setStatus('processing');
+        setWaitingForResponse(true);
+
+        onSendMessage({
+            text,
+            files: [],
+            inputMethod: 'voice'
+        });
+    }, [onSendMessage]);
 
     useEffect(() => {
         statusRef.current = status;
@@ -96,41 +169,49 @@ export default function VoiceModeOverlay({
             setHasGreeted(false);
             setWaitingForResponse(false);
             setLastProcessedMessage('');
+            lastProcessedMessageRef.current = '';
             stopListening();
             stopSpeaking();
             stopInterruptListening();
+            clearSilenceTimer();
+            draftRef.current = '';
+            lastSentRef.current = '';
+            ignoreSttUntilRef.current = 0;
+            lastAssistantNormRef.current = '';
         }
     }, [isOpen]);
 
     // Watch for AI response - prevent duplicates
     useEffect(() => {
         if (isOpen && waitingForResponse && !isAIGenerating && lastAIMessage) {
-            // Check if this is a new message (prevent duplicates)
-            if (lastAIMessage === lastProcessedMessage) return;
-
             setWaitingForResponse(false);
-            setLastProcessedMessage(lastAIMessage);
             const cleanedResponse = cleanText(lastAIMessage);
+
+            // Check if this is a new message (prevent duplicates).
+            // Use a ref guard so we don't rely on async state updates.
+            if (!cleanedResponse) return;
+            if (cleanedResponse === lastProcessedMessageRef.current) return;
+            lastProcessedMessageRef.current = cleanedResponse;
+            setLastProcessedMessage(cleanedResponse);
+            lastAssistantNormRef.current = normalize(cleanedResponse);
 
             setMessages(prev => [...prev, { role: 'assistant', text: cleanedResponse }]);
             setStatus('speaking');
 
-            // Start listening for "stop" while speaking
-            startInterruptListening();
-
             if (isSpeechSynthesisSupported()) {
                 speak(cleanedResponse, () => {
-                    stopInterruptListening();
                     setStatus('listening');
                     if (!isMuted) {
-                        setTimeout(() => startListeningMode(), 500);
+                        // Give the mic a moment to settle so we don't re-transcribe our own TTS.
+                        ignoreSttUntilRef.current = Date.now() + 1200;
+                        setTimeout(() => startListeningMode(), 1200);
                     }
                 });
             } else {
                 setTimeout(() => {
-                    stopInterruptListening();
                     setStatus('listening');
                     if (!isMuted) {
+                        ignoreSttUntilRef.current = Date.now() + 800;
                         startListeningMode();
                     }
                 }, 2000);
@@ -138,9 +219,13 @@ export default function VoiceModeOverlay({
         }
     }, [isAIGenerating, lastAIMessage, isOpen, waitingForResponse, isMuted, lastProcessedMessage]);
 
-    // Listen for "stop" command while AI is speaking (only if not muted)
+    // Listen for "stop"/barge-in while AI is generating or speaking (only if not muted)
     const startInterruptListening = useCallback(() => {
         if (!isSpeechRecognitionSupported() || isMuted) return;
+
+        // Avoid multiple recognition sessions.
+        if (interruptRecognitionRef.current) return;
+        interruptWantedRef.current = true;
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
@@ -151,26 +236,55 @@ export default function VoiceModeOverlay({
         recognition.onresult = (event) => {
             const result = event.results[event.results.length - 1];
             const text = result[0].transcript.toLowerCase().trim();
+            const isFinal = result.isFinal;
 
-            if (text.includes('stop') || text.includes('wait') || text.includes('pause') || text.includes('hold on')) {
-                console.log('[VoiceMode] Stop command detected');
+            // If the user starts talking while the AI is speaking, treat it as an interruption.
+            // Use keywords first (most reliable), otherwise require a bit more substance.
+            const isStopKeyword =
+                text.includes('stop') ||
+                text.includes('wait') ||
+                text.includes('pause') ||
+                text.includes('hold on');
+
+            const wordCount = text.split(/\s+/).filter(Boolean).length;
+            // For non-keyword interruption, require a final result to reduce false triggers
+            // from TTS audio bleeding into the mic.
+            const isBargeIn = isFinal && wordCount >= 2 && text.length >= 6;
+
+            if (isStopKeyword || isBargeIn) {
+                console.log('[VoiceMode] Interruption detected');
+                // Stop both voice + generation
+                onStop?.();
                 stopSpeaking();
                 stopInterruptListening();
+                setWaitingForResponse(false);
                 setStatus('listening');
-                setTimeout(() => startListeningMode(), 300);
+                if (!isMuted) {
+                    setTimeout(() => startListeningMode(), 300);
+                }
             }
         };
 
         recognition.onerror = () => { };
-        recognition.onend = () => { };
+        recognition.onend = () => {
+            interruptRecognitionRef.current = null;
+            if (!interruptWantedRef.current) return;
+            if (isMuted) return;
+            setTimeout(() => {
+                if (interruptWantedRef.current && !interruptRecognitionRef.current) {
+                    startInterruptListening();
+                }
+            }, 300);
+        };
 
         try {
             recognition.start();
             interruptRecognitionRef.current = recognition;
         } catch (e) { }
-    }, [isMuted]);
+    }, [isMuted, onStop]);
 
     const stopInterruptListening = useCallback(() => {
+        interruptWantedRef.current = false;
         if (interruptRecognitionRef.current) {
             try {
                 interruptRecognitionRef.current.stop();
@@ -179,28 +293,52 @@ export default function VoiceModeOverlay({
         }
     }, []);
 
+    // Keep interruption listener active while AI is generating or speaking.
+    useEffect(() => {
+        if (!isOpen || isMuted) {
+            stopInterruptListening();
+            return;
+        }
+
+        const shouldInterruptListen = status === 'speaking' || (waitingForResponse && isAIGenerating);
+        if (shouldInterruptListen) {
+            startInterruptListening();
+        } else {
+            stopInterruptListening();
+        }
+    }, [isOpen, isMuted, status, waitingForResponse, isAIGenerating, startInterruptListening, stopInterruptListening]);
+
     // Start listening
     const startListeningMode = useCallback(() => {
         if (!isSpeechRecognitionSupported() || isMuted) return;
 
+        // Ensure any previous timers are cleared and draft reset.
+        clearSilenceTimer();
+        draftRef.current = '';
         setTranscript('');
         setStatus('listening');
 
         startListening(
             (text, isFinal) => {
-                setTranscript(text);
+                if (Date.now() < ignoreSttUntilRef.current) return;
 
-                if (isFinal && text.trim()) {
-                    setMessages(prev => [...prev, { role: 'user', text: text.trim() }]);
-                    setTranscript('');
-                    setStatus('processing');
-                    setWaitingForResponse(true);
+                const trimmed = (text || '').trim();
+                draftRef.current = trimmed;
+                setTranscript(trimmed);
 
-                    onSendMessage({
-                        text: text.trim(),
-                        files: [],
-                        inputMethod: 'voice'
-                    });
+                // Debounce: send only after a clear pause.
+                // If recognition emits a final result quickly (short pauses), we still wait.
+                clearSilenceTimer();
+                if (trimmed) {
+                    silenceTimerRef.current = setTimeout(() => {
+                        if (statusRef.current !== 'listening' || isMuted) return;
+                        commitDraftIfReady();
+                    }, SILENCE_MS_TO_SEND);
+                }
+
+                // If it's final but empty, don't do anything.
+                if (isFinal && !trimmed) {
+                    // no-op
                 }
             },
             () => {
@@ -218,8 +356,10 @@ export default function VoiceModeOverlay({
                     console.warn('[VoiceMode] Error:', error);
                 }
             }
+            ,
+            { continuous: true, interimResults: true, lang: 'en-US' }
         );
-    }, [isMuted, onSendMessage]);
+    }, [isMuted, onSendMessage, commitDraftIfReady]);
 
     // Toggle mute
     const toggleMute = () => {

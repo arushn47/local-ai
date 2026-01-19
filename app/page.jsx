@@ -10,7 +10,7 @@ import UserMenu from '@components/UserMenu';
 import SettingsModal from '@components/SettingsModal';
 import AuthOverlay from '@components/AuthOverlay';
 import DeleteConfirmationModal from '@components/DeleteConfirmationModal';
-import AgentStepVisualizer, { AgentModeToggle, useAgentSteps } from '@components/AgentStepVisualizer';
+import AgentStepVisualizer, { useAgentSteps } from '@components/AgentStepVisualizer';
 import WakeWordIndicator from '@components/WakeWordIndicator';
 import VoiceModeOverlay from '@components/VoiceModeOverlay';
 import { auth, db } from '@/lib/firebase';
@@ -43,8 +43,10 @@ export default function App() {
     const [authLoading, setAuthLoading] = useState(true);
     const [showSettings, setShowSettings] = useState(false);
 
-    // Agent Mode State
-    const [agentModeEnabled, setAgentModeEnabled] = useState(false);
+    // Backend info (derived from SSE meta events per request)
+    const [backendMeta, setBackendMeta] = useState(null);
+
+    // Agent tools are always enabled; keep steps for visualization.
     const { steps: agentSteps, isThinking: agentThinking, handleSSEEvent, reset: resetAgentSteps } = useAgentSteps();
 
     // Wake Word State
@@ -53,6 +55,9 @@ export default function App() {
 
     // Voice Mode Overlay State
     const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+
+    // Prevent mic contention: suspend wake word while Voice Mode is active.
+    const wakeWordActive = wakeWordEnabled && !voiceModeOpen;
 
     // Check if Firebase is configured and user is logged in
     const useFirebasePersistence = Boolean(
@@ -430,7 +435,9 @@ export default function App() {
         }
 
         runningRef.current = true;
-        const shouldSpeak = inputMethod === 'voice' && hasTTSSupport;
+        // When Voice Mode overlay is open, it manages TTS itself.
+        // Avoid double-speaking by disabling page-level streaming TTS.
+        const shouldSpeak = inputMethod === 'voice' && hasTTSSupport && !voiceModeOpen;
 
         // Convert files to base64 for now (simplified - no Supabase storage)
         let imageUrls = [];
@@ -584,6 +591,7 @@ export default function App() {
 
             let aiMessage = null;
             let aiMessageId = null;
+            let actualModelUsed = modelToUse;
 
             if (shouldSpeak) {
                 streamingTTSRef.current = createStreamingTTS();
@@ -608,12 +616,22 @@ export default function App() {
                     try {
                         const json = JSON.parse(line.replace(/^data: /, ''));
 
+                        if (json.event === 'meta') {
+                            if (json.model) actualModelUsed = json.model;
+                            setBackendMeta({
+                                backend: json.backend || null,
+                                model: json.model || null,
+                                baseUrl: json.baseUrl || null,
+                            });
+                            continue;
+                        }
+
                         if (json.token && runningRef.current) {
                             if (!aiMessage) {
                                 aiMessageId = (typeof crypto !== 'undefined' && crypto.randomUUID)
                                     ? crypto.randomUUID()
                                     : String(Date.now() + 1);
-                                const modelDisplayName = getModelLabel(modelToUse);
+                                const modelDisplayName = getModelLabel(actualModelUsed);
                                 const headerText = autoSelectReason
                                     ? `**${modelDisplayName}** _${autoSelectReason}_`
                                     : `**${modelDisplayName}**`;
@@ -744,14 +762,21 @@ export default function App() {
                             </svg>
                         </button>
                         <ModelSelector model={selectedModel} setModel={setSelectedModel} />
-                        <AgentModeToggle
-                            isEnabled={agentModeEnabled}
-                            onToggle={() => setAgentModeEnabled(!agentModeEnabled)}
-                        />
+                        {backendMeta?.backend === 'gemini' && (
+                            <div
+                                className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs md:text-sm font-medium bg-blue-500/10 text-blue-200 border border-blue-500/20 max-w-[55vw] md:max-w-none"
+                                title="Cloud mode: Gemini 2.5 Flash is used regardless of your selected model."
+                            >
+                                <span className="hidden sm:inline">Cloud Only:</span>
+                                <span className="sm:hidden">Cloud:</span>
+                                <span className="font-semibold truncate">{getModelLabel(backendMeta.model || 'gemini-2.5-flash')}</span>
+                                <span className="hidden md:inline text-blue-200/70">(other selections ignored)</span>
+                            </div>
+                        )}
                     </div>
                     <div className="flex items-center gap-3">
                         <WakeWordIndicator
-                            enabled={wakeWordEnabled}
+                            enabled={wakeWordActive}
                             onWake={(command) => {
                                 const message = (command && command.trim())
                                     ? command.trim()
@@ -788,7 +813,7 @@ export default function App() {
                                             ));
                                         })()}
                                         {showTypingIndicator && <TypingIndicator />}
-                                        {agentModeEnabled && (agentThinking || agentSteps.length > 0) && (
+                                        {(agentThinking || agentSteps.length > 0) && (
                                             <AgentStepVisualizer steps={agentSteps} isThinking={agentThinking} />
                                         )}
                                         <div ref={chatEndRef} />

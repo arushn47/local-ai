@@ -4,12 +4,28 @@
  */
 
 // Model definitions with capabilities
+// NOTE: "online" here means Gemini (cloud). "offline" means local Ollama models.
 export const MODELS = {
-    VISION_PRIMARY: 'gemini-2.5-flash',
-    VISION_FALLBACK: 'llama3.2-vision:latest',
-    REASONING: 'gemini-2.5-flash',
-    FAST: 'gemini-2.5-flash',
+    offline: {
+        VISION_PRIMARY: 'qwen3-vl:8b',
+        VISION_FALLBACK: 'llama3.2-vision:latest',
+        REASONING: 'deepseek-r1:8b',
+        FAST: 'qwen2.5:7b-instruct',
+    },
+    online: {
+        VISION_PRIMARY: 'gemini-2.5-flash',
+        VISION_FALLBACK: 'gemini-2.5-flash',
+        REASONING: 'gemini-2.5-flash',
+        FAST: 'gemini-2.5-flash',
+    },
 };
+
+function getModelMode() {
+    const raw = (process.env.NEXT_PUBLIC_MODEL_MODE || '').toLowerCase().trim();
+    if (raw === 'online' || raw === 'offline') return raw;
+    // Default to offline mapping; server-side fallback can still route to Gemini.
+    return 'offline';
+}
 
 // Keywords for task detection
 const CODING_KEYWORDS = [
@@ -39,7 +55,9 @@ const CASUAL_GREETINGS = [
  * @param {boolean} hasImage - Whether an image is attached
  * @returns {{ taskType: string, model: string, reason: string }}
  */
-export function classifyTask(prompt, hasImage = false) {
+export function classifyTask(prompt, hasImage = false, options = {}) {
+    const mode = options?.mode || getModelMode();
+    const profile = MODELS[mode] || MODELS.offline;
     const lowerPrompt = prompt.toLowerCase().trim();
     const wordCount = prompt.split(/\s+/).length;
 
@@ -47,7 +65,7 @@ export function classifyTask(prompt, hasImage = false) {
     if (hasImage) {
         return {
             taskType: 'vision',
-            model: MODELS.VISION_PRIMARY,
+            model: profile.VISION_PRIMARY,
             reason: 'Image attached - using vision model',
         };
     }
@@ -62,7 +80,7 @@ export function classifyTask(prompt, hasImage = false) {
         if (isGreeting) {
             return {
                 taskType: 'casual',
-                model: MODELS.FAST,
+                model: profile.FAST,
                 reason: 'Casual greeting detected',
             };
         }
@@ -70,7 +88,7 @@ export function classifyTask(prompt, hasImage = false) {
         // Short but not a greeting - could be a quick question
         return {
             taskType: 'quick_qa',
-            model: MODELS.FAST,
+            model: profile.FAST,
             reason: 'Short prompt - using fast model',
         };
     }
@@ -84,7 +102,7 @@ export function classifyTask(prompt, hasImage = false) {
     if (hasCodeBlock || hasCodingKeywords) {
         return {
             taskType: 'coding',
-            model: MODELS.REASONING,
+            model: profile.REASONING,
             reason: 'Coding/technical task detected',
         };
     }
@@ -98,7 +116,7 @@ export function classifyTask(prompt, hasImage = false) {
     if (wordCount > 50 || hasReasoningKeywords) {
         return {
             taskType: 'reasoning',
-            model: MODELS.REASONING,
+            model: profile.REASONING,
             reason: 'Complex reasoning task detected',
         };
     }
@@ -106,7 +124,7 @@ export function classifyTask(prompt, hasImage = false) {
     // Default to fast model for general Q&A
     return {
         taskType: 'general',
-        model: MODELS.FAST,
+        model: profile.FAST,
         reason: 'General query - using fast model',
     };
 }
@@ -118,6 +136,7 @@ export function classifyTask(prompt, hasImage = false) {
  */
 export function getModelLabel(modelValue) {
     const labels = {
+        'gemini-3-pro': 'Gemini 3 Pro',
         'gemini-2.5-flash': 'Gemini 2.5 Flash',
         'gemini-1.5-flash': 'Gemini 1.5 Flash',
         'gemini-1.5-pro': 'Gemini 1.5 Pro',
